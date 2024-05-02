@@ -1,0 +1,17 @@
+name: Update Candidate Branch
+on:
+  push:
+    branches:
+      - main
+jobs:
+  update-candidate-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.BOT_SERVICE_TOKEN }}
+          ref: candidate
+      - name: Update Candidate Branch
+        run: |
+          git pull origin main --allow-unrelated-histories
+          git push origin candidate

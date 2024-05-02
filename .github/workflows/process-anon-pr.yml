@@ -1,0 +1,56 @@
+name: Process Anonymous Pull Request Review
+on:
+  workflow_dispatch:
+    inputs:
+      user_id:
+        description: 'User ID'
+        required: true
+        default: 'No user ID provided'
+#  repository_dispatch:
+#    types:
+#      - pull_request_review_submitted
+
+jobs:
+  process-anonymous-pr-review:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.BOT_SERVICE_TOKEN }}
+    steps:
+#      - name: Log Comment
+#        run: |
+#          echo "${{ github.event.client_payload.review.body }}"
+      - name: Sign in to Breezy HR API and save access_token
+        run: |
+          curl -s -X POST -H "Content-Type: application/json" \
+          -d '{"email": "${{ secrets.BREEZY_BOT_EMAIL }}", "password": "${{ secrets.BREEZY_BOT_PASSWORD }}"}' \
+          https://api.breezy.hr/v3/signin > breezy.json
+          BREEZY_ACCESS_TOKEN=$(cat breezy.json | jq -r '.access_token')
+          echo "BREEZY_ACCESS_TOKEN=$BREEZY_ACCESS_TOKEN" >> $GITHUB_ENV
+      - name: Get USER_ID from workflow_dispatch input
+        run: |
+          USER_ID=${{ github.event.inputs.user_id }}
+            echo "USER_ID=$USER_ID" >> $GITHUB_ENV
+#      - name: Get USER_ID from PR
+#        run: |
+#          USER_ID=$(echo "${{ github.event.client_payload.pull_request.title }}" | sed "s/Candidate: //")
+#          echo "USER_ID=$USER_ID" >> $GITHUB_ENV
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1.1.1
+        with:
+          credentials_json: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_CREDENTIALS }}
+          token_format: access_token
+          access_token_lifetime: 360s
+          access_token_scopes: "https://www.googleapis.com/auth/spreadsheets.readonly"
+      - name: Set USER_EMAIL
+        run: |
+          curl -s -X GET -H "Authorization: Bearer ${{ steps.auth.outputs.access_token }}" \
+          https://sheets.googleapis.com/v4/spreadsheets/${{ secrets.CANDIDATES_SHEET_ID }}/values/Sheet1!A1:Z1000 | jq -r '.values[] | select(.[0] == "${{ env.USER_ID }}" ) | .[1]' > email.txt
+          USER_EMAIL=$(cat email.txt)
+          echo "USER_EMAIL=$USER_EMAIL" >> $GITHUB_ENV
+      - name: Get the candidate id from Breezy
+        run: |
+          curl -s -X POST -H "Content-Type: application/json" \
+          -H "Authorization: Bearer ${{ env.BREEZY_ACCESS_TOKEN }}" \
+          -d '{"email": "'${{ env.USER_EMAIL }}'"}' \
+          https://api.breezy.hr/v3/company/${{ secrets.BREEZY_COMPANY_ID }}/candidates/search | jq -r '.candidates[0].id' > candidate_id.txt

@@ -1,0 +1,58 @@
+name: Create Cloned Repository
+
+on:
+  repository_dispatch:
+    types:
+      - clone-anonymous-repository
+  workflow_dispatch:
+    inputs:
+      username:
+        description: 'GitHub Username'
+        required: true
+      id:
+        description: 'The id associated with the user'
+        required: true
+
+jobs:
+  create-cloned-repository:
+    runs-on: ubuntu-latest
+    env:
+      USERNAME: ${{ github.event.client_payload.username || github.event.inputs.username }}
+      USER_ID: ${{ github.event.client_payload.id || github.event.inputs.id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          token: ${{ secrets.BOT_SERVICE_TOKEN }}
+          ref: candidate
+      - name: Configure Git
+        run: |
+          git config --global user.name "${{ secrets.BOT_SERVICE_USERNAME }}"
+          git config --global user.email "${{ secrets.BOT_SERVICE_EMAIL }}"
+          git config --global init.defaultBranch main
+      - name: Create New Repo
+        run: |
+          ORG_NAME=$(echo ${{ github.event.repository.full_name }} | cut -d '/' -f 1)
+          curl -X POST -H "Authorization: token ${{ secrets.BOT_SERVICE_TOKEN }}" \
+          -H "Accept: application/vnd.github+json" \
+          https://api.github.com/orgs/$ORG_NAME/repos \
+          -d '{"name": "${{ github.event.repository.name }}-${{ env.USER_ID }}", "private": true}'
+      - name: Push Cloned Repository
+        run: |
+          git checkout --orphan main
+          mv .gitignore .gitignore.bak
+          mv .copyignore .gitignore
+          git add .
+          rm .gitignore
+          mv .gitignore.bak .gitignore
+          git add .gitignore
+          git commit -m "Initial commit"
+          git remote set-url origin https://${{ secrets.BOT_SERVICE_USERNAME }}:${{ secrets.BOT_SERVICE_TOKEN }}@github.com/${{ github.event.repository.full_name }}-${{ env.USER_ID }}.git
+          git push -u origin main
+      - name: Add Collaborator to Repo
+        run: |
+          curl -X PUT -H "Authorization: token ${{ secrets.BOT_SERVICE_TOKEN }}" \
+          -H "Accept: application/vnd.github+json" \
+          -H "X-GitHub-Api-Version: 2022-11-28" \
+          https://api.github.com/repos/${{ github.event.repository.full_name }}-${{ env.USER_ID }}/collaborators/${{ env.USERNAME }} \
+          -d '{"permission": "write"}'

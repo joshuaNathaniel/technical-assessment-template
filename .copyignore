@@ -1,0 +1,8 @@
+### Required for cloning repository
+.gitignore
+.gitignore.bak
+.github
+
+tech-docs
+INSTRUCTIONS.md
+###

@@ -1,0 +1,11 @@
+{
+  "image": "mcr.microsoft.com/vscode/devcontainers/base",
+  "features": {},
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vsliveshare.vsliveshare"
+      ]
+    }
+  }
+}

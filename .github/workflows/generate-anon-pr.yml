@@ -1,0 +1,76 @@
+name: Generate Anonymous Pull Request
+on:
+  repository_dispatch:
+    types:
+      - pull_request_opened
+
+jobs:
+  generate-anonymous-pr:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.BOT_SERVICE_TOKEN }}
+    steps:
+      - name: Get User Id from Repository name
+        run: |
+          id=$(echo "${{ github.event.client_payload.repository.name }}" | sed "s/${{ github.event.repository.name }}-//") 
+          echo "USER_ID=$id" >> $GITHUB_ENV
+      - name: Clone
+        uses: actions/checkout@v2
+        with:
+          repository: ${{ github.event.client_payload.repository.full_name }}
+          token: ${{ secrets.BOT_SERVICE_TOKEN }}
+          fetch-depth: 0
+          ref: ${{ github.event.client_payload.pull_request.head.ref }}
+      - name: Set Remote
+        run: |
+          git remote set-url origin https://${{ secrets.BOT_SERVICE_USERNAME }}:${{ secrets.BOT_SERVICE_TOKEN }}@github.com/${{ github.event.repository.full_name }}.git
+      - name: Configure Git
+        run: |
+          git config --global user.name "${{ secrets.BOT_SERVICE_USERNAME }}"
+          git config --global user.email "${{ secrets.BOT_SERVICE_EMAIL }}"
+      - name: Anonymize Commits
+        run: |
+          git rebase -r --root --exec "git commit --amend --no-edit --reset-author"
+      - name: Pick Commits
+        run: |
+          git fetch origin candidate
+          git checkout candidate
+          git cherry-pick ${{ github.event.client_payload.pull_request.head.ref }}~1..${{ github.event.client_payload.pull_request.head.ref }}
+          git branch -D ${{ github.event.client_payload.pull_request.head.ref }}
+          git checkout -b ${{ github.event.client_payload.pull_request.head.ref }}-${{ env.USER_ID }}
+      - name: Push Branch
+        run: |
+          git push -u origin ${{ github.event.client_payload.pull_request.head.ref }}-${{ env.USER_ID }}
+      - name: Create PR with GitHub CLI
+        run: |
+          gh pr create \
+          --title "Candidate: ${{ env.USER_ID }}" \
+          --body "${{ github.event.client_payload.pull_request.body }}" \
+          --base candidate \
+          --head ${{ github.event.client_payload.pull_request.head.ref }}-${{ env.USER_ID }}
+      - name: Comment on original PR
+        run: |
+          curl -L \
+          -X POST \
+          -H "Authorization: token ${{ secrets.BOT_SERVICE_TOKEN }}" \
+          -H "Accept: application/vnd.github+json" \
+          -H "X-GitHub-Api-Version: 2022-11-28" \
+          https://api.github.com/repos/${{ github.event.client_payload.repository.full_name }}/issues/${{ github.event.client_payload.pull_request.number }}/comments \
+          -d '{"body": "Thank you, @${{ github.event.client_payload.sender.login }}, for your contribution! Your pull request has been anonymized and submitted to the candidate branch. You can no longer update your pull request. This repository will be deleted at the end of your scheduled time."}'
+      - name: Close original PR
+        run: |
+          curl -L \
+          -X PATCH \
+          -H "Authorization: token ${{ secrets.BOT_SERVICE_TOKEN }}" \
+          -H "Accept: application/vnd.github+json" \
+          -H "X-GitHub-Api-Version: 2022-11-28" \
+          https://api.github.com/repos/${{ github.event.client_payload.repository.full_name }}/pulls/${{ github.event.client_payload.pull_request.number }} \
+          -d '{"state": "closed"}'
+      - name: Delete Cloned Repo
+        run: |
+          curl -L \
+          -X DELETE \
+          -H "Authorization: token ${{ secrets.BOT_SERVICE_TOKEN }}" \
+          -H "Accept: application/vnd.github+json" \
+          -H "X-GitHub-Api-Version: 2022-11-28" \
+          https://api.github.com/repos/${{ github.event.client_payload.repository.full_name }}
